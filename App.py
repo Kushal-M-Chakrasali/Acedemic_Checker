@@ -1,4 +1,3 @@
-
 from flask import Flask, render_template, request, redirect, url_for, session, flash
 import sqlite3
 import os
@@ -12,7 +11,7 @@ from datetime import datetime
 # =====================================================
 
 app = Flask(__name__)
-app.secret_key = "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"
+app.secret_key = "your_secret_key_here"
 
 UPLOAD_FOLDER = "static/uploads"
 ALLOWED_EXTENSIONS = {"pdf"}
