@@ -1,12 +1,10 @@
-```python
 import streamlit as st
 import google.generativeai as genai
 from PyPDF2 import PdfReader
-import os
 
-# ==================================
+# ---------------------------------
 # PAGE CONFIG
-# ==================================
+# ---------------------------------
 
 st.set_page_config(
     page_title="Academic Reality Checker",
@@ -15,13 +13,18 @@ st.set_page_config(
 )
 
 st.title("🎓 Academic Reality Checker")
-st.subheader("AI-Powered Syllabus vs Industry Skill Analysis")
+st.write("Upload your syllabus PDF and compare it with industry requirements using Gemini AI.")
 
-# ==================================
+# ---------------------------------
 # GEMINI API KEY
-# ==================================
+# ---------------------------------
 
-api_key = st.secrets.get("GEMINI_API_KEY", "")
+api_key = ""
+
+try:
+    api_key = st.secrets["GEMINI_API_KEY"]
+except:
+    pass
 
 if not api_key:
     api_key = st.text_input(
@@ -30,14 +33,14 @@ if not api_key:
     )
 
 if not api_key:
-    st.warning("Please provide a Gemini API key.")
+    st.info("Please enter your Gemini API key to continue.")
     st.stop()
 
 genai.configure(api_key=api_key)
 
-# ==================================
+# ---------------------------------
 # PDF TEXT EXTRACTION
-# ==================================
+# ---------------------------------
 
 def extract_pdf_text(uploaded_file):
     text = ""
@@ -52,47 +55,49 @@ def extract_pdf_text(uploaded_file):
                 text += page_text + "\n"
 
     except Exception as e:
-        st.error(f"PDF Reading Error: {e}")
+        st.error(f"Error reading PDF: {e}")
 
     return text
 
-# ==================================
+# ---------------------------------
 # GEMINI ANALYSIS
-# ==================================
+# ---------------------------------
 
 def analyze_syllabus(text):
 
     prompt = f"""
-You are an expert placement mentor.
+You are an expert career mentor and placement trainer.
 
-Analyze the following college syllabus.
+Analyze this syllabus and provide:
 
-Provide:
-
-1. Key Topics Found
-2. Industry-Relevant Skills Missing
+1. Subjects and Skills Found
+2. Missing Industry Skills
 3. Placement Readiness Score (0-100)
 4. Gap Analysis
 5. Recommended Technologies
 6. Recommended Certifications
 7. Project Ideas
-8. 6-Month Learning Roadmap
-9. Internship Preparation Advice
+8. Learning Roadmap
+9. Internship Preparation Tips
 
 Syllabus:
 
-{text[:15000]}
+{text[:12000]}
 """
 
-    model = genai.GenerativeModel("gemini-1.5-flash")
+    try:
+        model = genai.GenerativeModel("gemini-1.5-flash")
 
-    response = model.generate_content(prompt)
+        response = model.generate_content(prompt)
 
-    return response.text
+        return response.text
 
-# ==================================
+    except Exception as e:
+        return f"Gemini Error: {str(e)}"
+
+# ---------------------------------
 # FILE UPLOAD
-# ==================================
+# ---------------------------------
 
 uploaded_file = st.file_uploader(
     "Upload Syllabus PDF",
@@ -103,17 +108,17 @@ if uploaded_file:
 
     st.success("PDF Uploaded Successfully")
 
-    with st.spinner("Extracting syllabus..."):
+    with st.spinner("Extracting text from PDF..."):
         syllabus_text = extract_pdf_text(uploaded_file)
 
     if syllabus_text.strip() == "":
         st.error("Could not extract text from PDF.")
         st.stop()
 
-    st.subheader("Extracted Content Preview")
+    st.subheader("Syllabus Preview")
 
     st.text_area(
-        "Preview",
+        "Extracted Text",
         syllabus_text[:3000],
         height=250
     )
@@ -135,26 +140,24 @@ if uploaded_file:
             mime="text/plain"
         )
 
-# ==================================
+# ---------------------------------
 # SIDEBAR
-# ==================================
+# ---------------------------------
 
 with st.sidebar:
 
-    st.header("About")
+    st.header("About Project")
 
     st.write("""
-Academic Reality Checker helps students compare
-their syllabus with current industry expectations.
+This project compares a college syllabus
+with current industry requirements and
+generates an AI-powered learning roadmap.
 """)
 
-    st.write("### Features")
+    st.markdown("### Features")
     st.write("✅ PDF Upload")
     st.write("✅ Gemini AI Analysis")
     st.write("✅ Skill Gap Detection")
+    st.write("✅ Placement Readiness Score")
     st.write("✅ Learning Roadmap")
     st.write("✅ Download Report")
-
-    st.write("---")
-    st.caption("Built using Streamlit + Gemini")
-```
