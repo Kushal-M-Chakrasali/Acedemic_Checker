@@ -1,88 +1,67 @@
-from flask import Flask, render_template, request, redirect, url_for, session, flash
-import sqlite3
-import os
-from werkzeug.utils import secure_filename
+```python
+import streamlit as st
 import google.generativeai as genai
 from PyPDF2 import PdfReader
-from datetime import datetime
+import os
 
-# =====================================================
-# CONFIGURATION
-# =====================================================
+# ==================================
+# PAGE CONFIG
+# ==================================
 
-app = Flask(__name__)
-app.secret_key = "your_secret_key_here"
+st.set_page_config(
+    page_title="Academic Reality Checker",
+    page_icon="🎓",
+    layout="wide"
+)
 
-UPLOAD_FOLDER = "static/uploads"
-ALLOWED_EXTENSIONS = {"pdf"}
+st.title("🎓 Academic Reality Checker")
+st.subheader("AI-Powered Syllabus vs Industry Skill Analysis")
 
-app.config["UPLOAD_FOLDER"] = UPLOAD_FOLDER
+# ==================================
+# GEMINI API KEY
+# ==================================
 
-# Gemini API Key
-GEMINI_API_KEY = "YOUR_GEMINI_API_KEY"
+api_key = st.secrets.get("GEMINI_API_KEY", "")
 
-genai.configure(api_key=GEMINI_API_KEY)
-model = genai.GenerativeModel("gemini-1.5-flash")
+if not api_key:
+    api_key = st.text_input(
+        "Enter Gemini API Key",
+        type="password"
+    )
 
-# =====================================================
-# DATABASE
-# =====================================================
+if not api_key:
+    st.warning("Please provide a Gemini API key.")
+    st.stop()
 
-def init_db():
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
+genai.configure(api_key=api_key)
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            password TEXT NOT NULL
-        )
-    """)
+# ==================================
+# PDF TEXT EXTRACTION
+# ==================================
 
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER,
-            filename TEXT,
-            analysis TEXT,
-            created_at TEXT
-        )
-    """)
-
-    conn.commit()
-    conn.close()
-
-init_db()
-
-# =====================================================
-# UTILITIES
-# =====================================================
-
-def allowed_file(filename):
-    return "." in filename and \
-           filename.rsplit(".", 1)[1].lower() in ALLOWED_EXTENSIONS
-
-
-def extract_pdf_text(pdf_path):
+def extract_pdf_text(uploaded_file):
     text = ""
 
     try:
-        reader = PdfReader(pdf_path)
+        reader = PdfReader(uploaded_file)
 
         for page in reader.pages:
-            extracted = page.extract_text()
-            if extracted:
-                text += extracted + "\n"
+            page_text = page.extract_text()
+
+            if page_text:
+                text += page_text + "\n"
 
     except Exception as e:
-        print("PDF Error:", e)
+        st.error(f"PDF Reading Error: {e}")
 
     return text
 
+# ==================================
+# GEMINI ANALYSIS
+# ==================================
 
 def analyze_syllabus(text):
+
     prompt = f"""
 You are an expert placement mentor.
 
@@ -92,288 +71,90 @@ Provide:
 
 1. Key Topics Found
 2. Industry-Relevant Skills Missing
-3. Gap Score (0-100%)
-4. Placement Readiness
+3. Placement Readiness Score (0-100)
+4. Gap Analysis
 5. Recommended Technologies
-6. Certifications
+6. Recommended Certifications
 7. Project Ideas
-8. Personalized Learning Roadmap
+8. 6-Month Learning Roadmap
+9. Internship Preparation Advice
 
-SYLLABUS:
+Syllabus:
+
 {text[:15000]}
 """
+
+    model = genai.GenerativeModel("gemini-1.5-flash")
 
     response = model.generate_content(prompt)
 
     return response.text
 
-# =====================================================
-# ROUTES
-# =====================================================
+# ==================================
+# FILE UPLOAD
+# ==================================
 
-@app.route("/")
-def home():
-    return render_template("index.html")
+uploaded_file = st.file_uploader(
+    "Upload Syllabus PDF",
+    type=["pdf"]
+)
 
+if uploaded_file:
 
-# =====================================================
-# REGISTER
-# =====================================================
+    st.success("PDF Uploaded Successfully")
 
-@app.route("/register", methods=["GET", "POST"])
-def register():
+    with st.spinner("Extracting syllabus..."):
+        syllabus_text = extract_pdf_text(uploaded_file)
 
-    if request.method == "POST":
+    if syllabus_text.strip() == "":
+        st.error("Could not extract text from PDF.")
+        st.stop()
 
-        name = request.form["name"]
-        email = request.form["email"]
-        password = request.form["password"]
+    st.subheader("Extracted Content Preview")
 
-        conn = sqlite3.connect("database.db")
-        cursor = conn.cursor()
-
-        try:
-            cursor.execute("""
-                INSERT INTO users(name,email,password)
-                VALUES(?,?,?)
-            """, (name, email, password))
-
-            conn.commit()
-
-            flash("Registration Successful", "success")
-
-            return redirect(url_for("login"))
-
-        except:
-            flash("Email already exists", "danger")
-
-        finally:
-            conn.close()
-
-    return render_template("register.html")
-
-
-# =====================================================
-# LOGIN
-# =====================================================
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-
-    if request.method == "POST":
-
-        email = request.form["email"]
-        password = request.form["password"]
-
-        conn = sqlite3.connect("database.db")
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT * FROM users
-            WHERE email=? AND password=?
-        """, (email, password))
-
-        user = cursor.fetchone()
-
-        conn.close()
-
-        if user:
-
-            session["user_id"] = user[0]
-            session["user_name"] = user[1]
-
-            flash("Login Successful", "success")
-
-            return redirect(url_for("dashboard"))
-
-        else:
-            flash("Invalid Credentials", "danger")
-
-    return render_template("login.html")
-
-
-# =====================================================
-# DASHBOARD
-# =====================================================
-
-@app.route("/dashboard")
-def dashboard():
-
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT * FROM reports
-        WHERE user_id=?
-        ORDER BY id DESC
-    """, (session["user_id"],))
-
-    reports = cursor.fetchall()
-
-    conn.close()
-
-    return render_template(
-        "dashboard.html",
-        reports=reports,
-        username=session["user_name"]
+    st.text_area(
+        "Preview",
+        syllabus_text[:3000],
+        height=250
     )
 
+    if st.button("Analyze with Gemini AI"):
 
-# =====================================================
-# UPLOAD
-# =====================================================
+        with st.spinner("Analyzing syllabus..."):
 
-@app.route("/upload", methods=["GET", "POST"])
-def upload():
+            result = analyze_syllabus(syllabus_text)
 
-    if "user_id" not in session:
-        return redirect(url_for("login"))
+        st.subheader("Analysis Report")
 
-    if request.method == "POST":
+        st.markdown(result)
 
-        if "pdf" not in request.files:
-            flash("No file selected", "danger")
-            return redirect(request.url)
+        st.download_button(
+            label="Download Report",
+            data=result,
+            file_name="academic_reality_report.txt",
+            mime="text/plain"
+        )
 
-        file = request.files["pdf"]
+# ==================================
+# SIDEBAR
+# ==================================
 
-        if file.filename == "":
-            flash("No file selected", "danger")
-            return redirect(request.url)
+with st.sidebar:
 
-        if file and allowed_file(file.filename):
+    st.header("About")
 
-            filename = secure_filename(file.filename)
+    st.write("""
+Academic Reality Checker helps students compare
+their syllabus with current industry expectations.
+""")
 
-            filepath = os.path.join(
-                app.config["UPLOAD_FOLDER"],
-                filename
-            )
+    st.write("### Features")
+    st.write("✅ PDF Upload")
+    st.write("✅ Gemini AI Analysis")
+    st.write("✅ Skill Gap Detection")
+    st.write("✅ Learning Roadmap")
+    st.write("✅ Download Report")
 
-            file.save(filepath)
-
-            flash("PDF Uploaded Successfully", "success")
-
-            # Extract text
-            syllabus_text = extract_pdf_text(filepath)
-
-            # AI Analysis
-            analysis = analyze_syllabus(syllabus_text)
-
-            # Save report
-            conn = sqlite3.connect("database.db")
-            cursor = conn.cursor()
-
-            cursor.execute("""
-                INSERT INTO reports
-                (user_id, filename, analysis, created_at)
-                VALUES (?, ?, ?, ?)
-            """, (
-                session["user_id"],
-                filename,
-                analysis,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            ))
-
-            conn.commit()
-
-            report_id = cursor.lastrowid
-
-            conn.close()
-
-            return redirect(
-                url_for("view_report", report_id=report_id)
-            )
-
-    return render_template("upload.html")
-
-
-# =====================================================
-# REPORT VIEW
-# =====================================================
-
-@app.route("/report/<int:report_id>")
-def view_report(report_id):
-
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        SELECT * FROM reports
-        WHERE id=?
-    """, (report_id,))
-
-    report = cursor.fetchone()
-
-    conn.close()
-
-    if report is None:
-        flash("Report Not Found", "danger")
-        return redirect(url_for("dashboard"))
-
-    return render_template(
-        "report.html",
-        report=report
-    )
-
-
-# =====================================================
-# DELETE REPORT
-# =====================================================
-
-@app.route("/delete/<int:report_id>")
-def delete_report(report_id):
-
-    if "user_id" not in session:
-        return redirect(url_for("login"))
-
-    conn = sqlite3.connect("database.db")
-    cursor = conn.cursor()
-
-    cursor.execute("""
-        DELETE FROM reports
-        WHERE id=?
-    """, (report_id,))
-
-    conn.commit()
-    conn.close()
-
-    flash("Report Deleted", "success")
-
-    return redirect(url_for("dashboard"))
-
-
-# =====================================================
-# LOGOUT
-# =====================================================
-
-@app.route("/logout")
-def logout():
-
-    session.clear()
-
-    flash("Logged Out Successfully", "success")
-
-    return redirect(url_for("login"))
-
-
-# =====================================================
-# MAIN
-# =====================================================
-
-if __name__ == "__main__":
-
-    if not os.path.exists("static/uploads"):
-        os.makedirs("static/uploads")
-
-    app.run(
-        debug=True,
-        host="0.0.0.0",
-        port=5000
-    )
+    st.write("---")
+    st.caption("Built using Streamlit + Gemini")
+```
